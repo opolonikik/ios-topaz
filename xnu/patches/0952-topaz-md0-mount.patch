@@ -1,0 +1,96 @@
+--- a/bsd/sys/mount_internal.h
++++ b/bsd/sys/mount_internal.h
+@@ -484,6 +484,7 @@
+ #define KERNEL_MOUNT_DEVFS             0x100 /* kernel startup mount of devfs */
+ #define KERNEL_MOUNT_FMOUNT            0x200 /* is fmount() system call */
+ #define KERNEL_MOUNT_KMOUNT            0x400 /* is kernel_mount() call */
++#define KERNEL_MOUNT_TOPAZ_RAMDISK     0x800 /* SWEET: additional HFS RAMDisk */
+ 
+ /* mask for checking if any of the "mount volume by role" flags are set */
+ #define KERNEL_MOUNT_VOLBYROLE_MASK (KERNEL_MOUNT_DATAVOL | KERNEL_MOUNT_VMVOL | KERNEL_MOUNT_PREBOOTVOL | KERNEL_MOUNT_RECOVERYVOL)
+--- a/bsd/vfs/vfs_syscalls.c
++++ b/bsd/vfs/vfs_syscalls.c
+@@ -301,6 +301,18 @@
+ 
+ 	kern_flags &= KERNEL_MOUNT_SANITIZE_MASK;
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (kern_flags & KERNEL_MOUNT_TOPAZ_RAMDISK) {
++		if (strcmp(fstype, "hfs") != 0 ||
++		    strcmp(path, "/topaz") != 0 ||
++		    data == NULL ||
++		    strcmp(*(const char *const *)data, "/dev/md0") != 0 ||
++		    !(syscall_flags & MNT_RDONLY)) {
++			return EINVAL;
++		}
++	}
++#endif
++
+ 	/*
+ 	 * Get the vnode to be covered if it's not supplied
+ 	 */
+@@ -1173,7 +1185,8 @@
+ 	 */
+ 	if (kernelmount && (vfsp->vfc_vfsflags & VFC_VFSLOCALARGS) &&
+ 	    ((internal_flags & KERNEL_MOUNT_VOLBYROLE_MASK) == 0) &&
+-	    ((internal_flags & KERNEL_MOUNT_BASESYSTEMROOT) == 0)) {
++	    ((internal_flags & KERNEL_MOUNT_BASESYSTEMROOT) == 0) &&
++	    ((internal_flags & KERNEL_MOUNT_TOPAZ_RAMDISK) == 0)) {
+ 		error = EINVAL;  /* unsupported request */
+ 		goto out1;
+ 	}
+@@ -1328,6 +1341,15 @@
+ 			mp->mnt_supl_kern_flag |= MNTK_SUPL_BASESYSTEM;
+ 		}
+ #endif // CONFIG_BASESYSTEMROOT
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++		if (internal_flags & KERNEL_MOUNT_TOPAZ_RAMDISK) {
++			const char *const *devnamepp =
++			    (const char *const *)(uintptr_t)fsmountargs;
++			devpath = CAST_USER_ADDR_T(*devnamepp);
++			do_copyin_devpath = false;
++			fsmountargs = USER_ADDR_NULL;
++		}
++#endif
+ 
+ 		if (do_copyin_devpath) {
+ 			if (vfs_context_is64bit(ctx)) {
+@@ -1356,6 +1378,11 @@
+ 				seg = UIO_SYSSPACE;
+ 			}
+ #endif // CONFIG_BASESYSTEMROOT
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++			if (internal_flags & KERNEL_MOUNT_TOPAZ_RAMDISK) {
++				seg = UIO_SYSSPACE;
++			}
++#endif
+ 
+ 			NDINIT(&nd, LOOKUP, OP_MOUNT, FOLLOW, seg, devpath, ctx);
+ 			if ((error = namei(&nd))) {
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -1002,6 +1002,24 @@
+ 	}
+ #endif /* DEVFS */
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	{
++		uint32_t topaz_mount = 0;
++		if (PE_parse_boot_argn("topaz_mount",
++		    &topaz_mount, sizeof(topaz_mount)) && topaz_mount == 1) {
++			const char *device = "/dev/md0";
++			extern int kernel_mount(const char *, vnode_t, vnode_t,
++			    const char *, void *, size_t, int, uint32_t, vfs_context_t);
++			int error = kernel_mount("hfs", NULLVP, NULLVP,
++			    "/topaz", &device, sizeof(device),
++			    MNT_RDONLY | MNT_NOATIME,
++			    KERNEL_MOUNT_TOPAZ_RAMDISK,
++			    vfs_context_kernel());
++			printf("TOPAZ MOUNT: /dev/md0 -> /topaz: %d\n", error);
++		}
++	}
++#endif
++
+ #if CONFIG_BASESYSTEMROOT
+ #if CONFIG_IMAGEBOOT
+ 	if (bsdmgroot_bootable()) {
