@@ -1,0 +1,84 @@
+diff --git a/osfmk/kern/sync_sema.c b/osfmk/kern/sync_sema.c
+--- a/osfmk/kern/sync_sema.c
++++ b/osfmk/kern/sync_sema.c
+@@ -55,6 +55,36 @@
+ #include <kern/waitq.h>
+ #include <kern/zalloc.h>
+ #include <kern/mach_param.h>
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++/* Opt-in semaphore trace. Disabled unless sweetsem=1. */
++#include <pexpert/pexpert.h>
++#include <sys/proc.h>
++#include <libkern/libkern.h>
++
++static int sweetsem_enabled = -1;
++static unsigned int sweetsem_lines;
++
++static bool
++sweetsem_lsd_log(void)
++{
++	if (sweetsem_enabled < 0) {
++		uint32_t on = 0;
++		(void)PE_parse_boot_argn("sweetsem", &on, sizeof(on));
++		sweetsem_enabled = on ? 1 : 0;
++	}
++	if (!sweetsem_enabled || sweetsem_lines >= 600) {
++		return false;
++	}
++	char name[32] = { 0 };
++	proc_selfname(name, sizeof(name));
++	if (strcmp(name, "lsd") != 0) {
++		return false;
++	}
++	++sweetsem_lines;
++	return true;
++}
++#endif /* ARM64_BOARD_CONFIG_SWEET */
+ 
+ static const uint8_t semaphore_event;
+ #define SEMAPHORE_EVENT CAST_EVENT64_T(&semaphore_event)
+@@ -536,6 +566,14 @@
+ 		kr = semaphore_signal_internal(semaphore,
+ 		    THREAD_NULL,
+ 		    SEMAPHORE_SIGNAL_PREPOST);
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++		/* Record raw result before normalization. */
++		if (sweetsem_lsd_log()) {
++			printf("SSEM pid=%d tid=%llu SIGNAL port=0x%x obj=%p raw=%d\n",
++			    proc_selfpid(), (unsigned long long)current_thread()->thread_id,
++			    sema_name, (void *)semaphore, kr);
++		}
++#endif
+ 		semaphore_dereference(semaphore);
+ 		if (kr == KERN_NOT_WAITING) {
+ 			kr = KERN_SUCCESS;
+@@ -637,6 +675,13 @@
+ 	semaphore_cont_t caller_cont = self->sth_continuation;
+ 
+ 	assert(self->sth_waitsemaphore != SEMAPHORE_NULL);
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (sweetsem_lsd_log()) {
++		printf("SSEM pid=%d tid=%llu WAKE obj=%p wr=%d\n",
++		    proc_selfpid(), (unsigned long long)self->thread_id,
++		    (void *)self->sth_waitsemaphore, wr);
++	}
++#endif
+ 	semaphore_dereference(self->sth_waitsemaphore);
+ 	if (self->sth_signalsemaphore != SEMAPHORE_NULL) {
+ 		semaphore_dereference(self->sth_signalsemaphore);
+@@ -846,6 +891,14 @@
+ 	kern_return_t kr;
+ 
+ 	kr = port_name_to_semaphore(name, &semaphore);
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	/* Waiting syscall may resume via a continuation. */
++	if (sweetsem_lsd_log()) {
++		printf("SSEM pid=%d tid=%llu WAIT port=0x%x obj=%p lookup=%d\n",
++		    proc_selfpid(), (unsigned long long)current_thread()->thread_id,
++		    name, kr == KERN_SUCCESS ? (void *)semaphore : NULL, kr);
++	}
++#endif
+ 	if (kr == KERN_SUCCESS) {
+ 		kr = semaphore_wait_internal(semaphore,
+ 		    SEMAPHORE_NULL,
