@@ -6,20 +6,21 @@ VERSION=25.0.7
 SHA256=592272df3cf01e85e7db300c449df5061092574d099da275d19e97ef0510f8a6
 ROOT=$(cd "$(dirname "$0")" && pwd)
 B=$ROOT/build-mesa
+mkdir -p "$B"
 SDK=$(xcrun --sdk iphoneos --show-sdk-path)
 CC=$(xcrun --sdk iphoneos -f clang)
 cd "$B"
-PATCHES=$(cat "$ROOT"/mesa/*.patch | shasum -a 256 | cut -d' ' -f1)
+PATCHES=$(cat "$ROOT"/*.patch | shasum -a 256 | cut -d' ' -f1)
 if [ ! -d mesa-$VERSION ] || [ "$(cat mesa-$VERSION/.redwood-patches 2>/dev/null)" != "$PATCHES" ]; then
 	[ -f mesa-$VERSION.tar.xz ] || curl -sL --fail -o mesa-$VERSION.tar.xz https://archive.mesa3d.org/mesa-$VERSION.tar.xz
 	echo "$SHA256  mesa-$VERSION.tar.xz" | shasum -a 256 -c --quiet
 	rm -rf mesa-$VERSION build-*
 	tar xJf mesa-$VERSION.tar.xz
-	for p in "$ROOT"/mesa/*.patch; do patch -s --no-backup-if-mismatch -d mesa-$VERSION -p1 < "$p"; done
+	for p in "$ROOT"/*.patch; do patch -s --no-backup-if-mismatch -d mesa-$VERSION -p1 < "$p"; done
 	echo "$PATCHES" > mesa-$VERSION/.redwood-patches
 fi
 rm -rf mesa-$VERSION/src/redwood-drm
-cp -r "$ROOT/mesa/redwood-drm" mesa-$VERSION/src/redwood-drm
+cp -r "$ROOT/redwood-drm" mesa-$VERSION/src/redwood-drm
 if [ ! -x venv/bin/python3 ]; then
 	python3 -m venv venv
 	venv/bin/pip -q install mako pyyaml packaging

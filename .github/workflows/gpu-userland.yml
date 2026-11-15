@@ -1,0 +1,46 @@
+name: gpu-userland
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Inspect iOS SDK
+        run: |
+          xcodebuild -version
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          echo "iPhoneOS SDK: $SDK"
+          test -d "$SDK"
+
+      - name: Compile Topaz injection library
+        run: |
+          mkdir -p gpu-out
+
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+
+          xcrun --sdk iphoneos clang \
+            -target arm64-apple-ios16.0 \
+            -isysroot "$SDK" \
+            -dynamiclib \
+            -O2 \
+            -framework CoreFoundation \
+            -framework IOKit \
+            -Wl,-install_name,/topaz/lib/libtopaz-inject.dylib \
+            userland/gpu/topaz_inject.c \
+            -o gpu-out/libtopaz-inject.dylib
+
+          file gpu-out/libtopaz-inject.dylib
+
+      - name: Upload library
+        uses: actions/upload-artifact@v4
+        with:
+          name: topaz-inject
+          path: gpu-out/libtopaz-inject.dylib
+          retention-days: 7
