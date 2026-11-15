@@ -1,0 +1,84 @@
+name: mesa-ios
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure Xcode
+        run: |
+          xcodebuild -version
+
+          echo "=== iPhoneOS SDK ==="
+          xcrun --sdk iphoneos --show-sdk-path
+
+          echo "=== Clang ==="
+          xcrun --sdk iphoneos clang --version
+
+      - name: Install build dependencies
+        run: |
+          brew install meson ninja bison pkg-config
+
+          python3 -m pip --version
+          meson --version
+          ninja --version
+
+      - name: Validate Mesa inputs
+        run: |
+          echo "=== SOURCES ==="
+          ls -lh userland/mesa/
+
+          echo "=== DRM SHIM ==="
+          ls -lh userland/mesa/redwood-drm/
+
+          echo "=== PATCHES ==="
+          ls -lh userland/mesa/*.patch
+
+          echo "=== SCRIPT SYNTAX ==="
+          bash -n userland/mesa/mk-mesa-mac.sh
+
+      - name: Build Mesa for iOS ARM64
+        env:
+          DRIVERS: softpipe,freedreno
+        run: |
+          bash userland/mesa/mk-mesa-mac.sh
+
+      - name: Inspect Mesa library
+        run: |
+          echo "=== MESA OUTPUT ==="
+          ls -lh userland/mesa/build-mesa/out/
+
+          echo "=== MACH-O ==="
+          file userland/mesa/build-mesa/out/libOSMesa.8.dylib
+
+          echo "=== ARCHITECTURE ==="
+          xcrun lipo -info \
+            userland/mesa/build-mesa/out/libOSMesa.8.dylib
+
+      - name: Upload Mesa library
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mesa-ios-arm64
+          path: userland/mesa/build-mesa/out/
+          retention-days: 7
+
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mesa-build-diagnostics
+          path: |
+            userland/mesa/build-mesa/meson-setup.log
+            userland/mesa/build-mesa/ninja.log
+            userland/mesa/build-mesa/cross.ini
+            userland/mesa/build-mesa/build-*/meson-logs/meson-log.txt
+          if-no-files-found: warn
+          retention-days: 7

@@ -9,12 +9,13 @@ B=$ROOT/build-mesa
 mkdir -p "$B"
 SDK=$(xcrun --sdk iphoneos --show-sdk-path)
 CC=$(xcrun --sdk iphoneos -f clang)
+CXX=$(xcrun --sdk iphoneos -f clang++)
 cd "$B"
 PATCHES=$(cat "$ROOT"/*.patch | shasum -a 256 | cut -d' ' -f1)
 if [ ! -d mesa-$VERSION ] || [ "$(cat mesa-$VERSION/.redwood-patches 2>/dev/null)" != "$PATCHES" ]; then
 	[ -f mesa-$VERSION.tar.xz ] || curl -sL --fail -o mesa-$VERSION.tar.xz https://archive.mesa3d.org/mesa-$VERSION.tar.xz
 	echo "$SHA256  mesa-$VERSION.tar.xz" | shasum -a 256 -c --quiet
-	rm -rf mesa-$VERSION build-*
+	rm -rf "mesa-$VERSION" "build-softpipe-freedreno" "build-softpipe" "build-freedreno"
 	tar xJf mesa-$VERSION.tar.xz
 	for p in "$ROOT"/*.patch; do patch -s --no-backup-if-mismatch -d mesa-$VERSION -p1 < "$p"; done
 	echo "$PATCHES" > mesa-$VERSION/.redwood-patches
@@ -30,7 +31,7 @@ T=(-target arm64-apple-ios16.0 -isysroot "$SDK")
 cat > cross.ini <<INI
 [binaries]
 c = ['$CC', '-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK']
-cpp = ['$CC++', '-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK', '-fuse-cxa-atexit']
+cpp = ['$CXX', '-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK', '-fuse-cxa-atexit']
 objc = ['$CC', '-target', 'arm64-apple-ios16.0', '-isysroot', '$SDK']
 ar = '$(xcrun -f ar)'
 ranlib = '$(xcrun -f ranlib)'
