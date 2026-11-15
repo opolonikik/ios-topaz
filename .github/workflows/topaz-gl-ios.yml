@@ -1,0 +1,143 @@
+name: topaz-gl-ios
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Mesa artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p deps
+
+          RUN_ID=$(gh run list \
+            --workflow mesa-ios.yml \
+            --branch "${GITHUB_REF_NAME}" \
+            --status success \
+            --limit 10 \
+            --json databaseId \
+            --jq '.[0].databaseId')
+
+          if [ -z "$RUN_ID" ]; then
+            echo "ERROR: no successful Mesa run on ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+
+          echo "Mesa workflow run: $RUN_ID"
+
+          gh run download "$RUN_ID" \
+            --name mesa-ios-arm64 \
+            --dir deps
+
+          test -s deps/libOSMesa.8.dylib
+          test -s deps/gl.xml
+          test -s deps/exported-gl.txt
+
+          file deps/libOSMesa.8.dylib
+          shasum -a 256 deps/libOSMesa.8.dylib
+
+      - name: Fetch pinned EAGL generator
+        run: |
+          mkdir -p generator gpu-out
+
+          BASE="https://raw.githubusercontent.com/oosexgang/hakios-xnu-kernel/63fc2b4633bac3af8e57dadab9f5a8d4cb940438"
+
+          curl -fLSs --retry 3 \
+            "$BASE/userland/mkeagl.py" \
+            -o generator/mkeagl.py
+
+          curl -fLSs --retry 3 \
+            "$BASE/userland/src/eagl_slots.txt" \
+            -o generator/eagl_slots.txt
+
+          python3 -m py_compile generator/mkeagl.py
+
+      - name: Generate EAGL table
+        run: |
+          python3 generator/mkeagl.py \
+            generator/eagl_slots.txt \
+            deps/gl.xml \
+            deps/exported-gl.txt \
+            userland/gpu/eagl.c \
+            > gpu-out/eagl_gen.h
+
+          test -s gpu-out/eagl_gen.h
+
+          grep -q 'EAGL_GEN_DECLARATIONS' gpu-out/eagl_gen.h
+          grep -q 'EAGL_GEN_TABLE' gpu-out/eagl_gen.h
+          grep -q 'eagl_fill_table' gpu-out/eagl_gen.h
+
+          wc -lc gpu-out/eagl_gen.h
+
+      - name: Build libtopaz-gl
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+
+          xcrun --sdk iphoneos clang \
+            -target arm64-apple-ios16.0 \
+            -isysroot "$SDK" \
+            -dynamiclib \
+            -O2 \
+            -I gpu-out \
+            -I userland/gpu \
+            -framework CoreFoundation \
+            -framework IOKit \
+            -framework IOSurface \
+            -lobjc \
+            -Wl,-install_name,/topaz/lib/libtopaz-gl.dylib \
+            userland/gpu/eagl.c \
+            userland/gpu/gl_osmesa.c \
+            deps/libOSMesa.8.dylib \
+            -o gpu-out/libtopaz-gl.dylib \
+            2>&1 | tee gpu-out/build.log
+
+      - name: Inspect output
+        run: |
+          echo "=== MACH-O ==="
+          file gpu-out/libtopaz-gl.dylib
+
+          echo "=== ARCHITECTURE ==="
+          xcrun lipo -info gpu-out/libtopaz-gl.dylib
+
+          echo "=== DEPENDENCIES ==="
+          otool -L gpu-out/libtopaz-gl.dylib
+
+          echo "=== SHA256 ==="
+          shasum -a 256 gpu-out/libtopaz-gl.dylib
+
+          echo "=== REQUIRED EXPORTS ==="
+          nm -gU gpu-out/libtopaz-gl.dylib \
+            | grep -E '_redwood_gl_function_(refused|values)$'
+
+      - name: Upload library
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: topaz-gl-arm64
+          path: |
+            gpu-out/libtopaz-gl.dylib
+            gpu-out/eagl_gen.h
+          retention-days: 7
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: topaz-gl-diagnostics
+          path: |
+            gpu-out/build.log
+            gpu-out/eagl_gen.h
+          if-no-files-found: warn
+          retention-days: 7
