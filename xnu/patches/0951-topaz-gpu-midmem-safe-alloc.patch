@@ -1,0 +1,36 @@
+From: topaz
+Subject: [PATCH] topaz: refuse fixed-pool GPU allocation fallback in MIDMEM
+
+In the MIDMEM ADT, the fixed 0x90000000 GPU pool overlaps kernel-managed RAM.
+Return an allocation error rather than handing out overlapping physical pages.
+Keep legacy non-MIDMEM behavior unchanged.
+
+---
+diff --git a/iokit/Kernel/arm/RedwoodGPU.cpp b/iokit/Kernel/arm/RedwoodGPU.cpp
+--- a/iokit/Kernel/arm/RedwoodGPU.cpp
++++ b/iokit/Kernel/arm/RedwoodGPU.cpp
+@@ -800,4 +800,10 @@
+ 			return kIOReturnSuccess;
++		}
++		/* gpu_midmem=1: do not fall back to the fixed physical pool,
++		 * which overlaps kernel-managed RAM in the MIDMEM ADT. */
++		if (topaz_gpu_midmem()) {
++			IOLog("RedwoodGPU: MIDMEM GEM allocation failed (%llu bytes)\n", size);
++			return kIOReturnNoMemory;
+ 		}
+ 		/* else: from the GPU's pool below 4 GiB (contiguous, write-combined) */
+ 		void * va = NULL;
+diff --git a/iokit/Kernel/arm/TopazAdreno.cpp b/iokit/Kernel/arm/TopazAdreno.cpp
+--- a/iokit/Kernel/arm/TopazAdreno.cpp
++++ b/iokit/Kernel/arm/TopazAdreno.cpp
+@@ -328,4 +328,8 @@
+ 	if (b->md == NULL) {
++		if (gpu_midmem) {
++			IOLog("TopazGPU: MIDMEM allocation failed (%llu bytes)\n", size);
++			return false;
++		}
+ 		return kbuf_alloc_low(b, size);         /* (an ADT without the middle bank: the pool) */
+ 	}
+ 	b->va = (uint8_t *)b->md->getBytesNoCopy();
+-- 
+2.43.0
