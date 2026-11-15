@@ -9,8 +9,8 @@ diff --git a/osfmk/kern/sync_sema.c b/osfmk/kern/sync_sema.c
 +#if defined(ARM64_BOARD_CONFIG_SWEET)
 +/* Opt-in semaphore trace. Disabled unless sweetsem=1. */
 +#include <pexpert/pexpert.h>
-+#include <sys/proc.h>
-+#include <libkern/libkern.h>
++extern void proc_selfname(char *buf, int size);
++extern int proc_selfpid(void);
 +
 +static int sweetsem_enabled = -1;
 +static unsigned int sweetsem_lines;
@@ -28,7 +28,7 @@ diff --git a/osfmk/kern/sync_sema.c b/osfmk/kern/sync_sema.c
 +	}
 +	char name[32] = { 0 };
 +	proc_selfname(name, sizeof(name));
-+	if (strcmp(name, "lsd") != 0) {
++	if (name[0] != 'l' || name[1] != 's' || name[2] != 'd' || name[3] != 0) {
 +		return false;
 +	}
 +	++sweetsem_lines;
